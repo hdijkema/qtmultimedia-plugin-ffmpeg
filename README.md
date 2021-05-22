@@ -6,11 +6,12 @@ Multimedia plugins are looked up in alphabetical order,
 so the ffmpeg plugin may be not selected. 
 
 ## Features
-- All formats. You can replace ffmpeg library to support more formats
-- OpenGL rendering
+- All ffmpeg formats can be played. 
+- You can replace the ffmpeg library to support more formats.
+- OpenGL rendering.
 
 ## Build
-- Build and install. Just make it in QtCreator.
+- Build and install. Just qmake it in QtCreator.
 - Make sure the right ffmpeg library is installed somewhere it can be found, see fmpeg-plugin.pro for details.
 - This plugin has been tested and build against [ffmpeg 4.1](https://ffmpeg.org).
 - This plugin uses QtAudioOuput for audioplayback as a default backend, but if you have SDL2 somewhere installed it will be loaded and used instead.
@@ -35,8 +36,9 @@ Thanks to all persons who created programs and examples for using ffmpeg to stre
 Without it, I would have been lost. 
 
 ## License
-This plugin library for Qt is licensed under LGPLv3. 
+This plugin library for Qt is licensed under LGPLv2.1. 
 
-
+## See Also
+- Checkout the zcVideoWidget that can be used to display video that is being played with the Qt MultiMedia framework
 
 
