@@ -191,6 +191,7 @@ public:
     QMutex               mutex;
     int                  audio_stream_index;
     int                  video_stream_index;
+    int                  duration_in_ms;
     int                  position_in_ms;
     int                  pos_offset_in_ms;
     QElapsedTimer        elapsed;
@@ -213,7 +214,7 @@ public:
 class DecoderThread : public QThread
 {
 public:
-    enum PlayState { Stopped, Paused, Playing };
+    enum PlayState { Stopped, Paused, Playing, Ended };
 
 private:
     FFmpegProvider      *_provider;
@@ -228,6 +229,7 @@ public:
 
 public:
     static DecoderThread::PlayState toDecoderState(FFmpegProvider::State s);
+    static FFmpegProvider::State toFFmpegState(PlayState s);
 
 public:
     void endDecoder();
@@ -261,6 +263,7 @@ FFmpegProvider::FFmpegProvider(MediaPlayerControl *parent)
 
     connect(this, &FFmpegProvider::imageAvailable, this, &FFmpegProvider::handleImageAvailable, Qt::QueuedConnection);
     connect(this, &FFmpegProvider::pcmAvailable, this, &FFmpegProvider::handleAudioAvailable, Qt::QueuedConnection);
+    connect(this, &FFmpegProvider::setStateSig, this, &FFmpegProvider::handleSetState, Qt::QueuedConnection);
 }
 
 FFmpegProvider::~FFmpegProvider()
@@ -445,6 +448,8 @@ bool FFmpegProvider::setMedia(const QString &_url)
 {
     LINE_INFO << "Trying to load media from" << _url;
 
+    _current_url = _url;
+
     stopThreads();
 
     setState(Stopped);
@@ -459,10 +464,7 @@ bool FFmpegProvider::setMedia(const QString &_url)
         }
     }
 
-    url = "https://www.rmp-streaming.com/media/big-buck-bunny-360p.mp4";
     QUrl u(url);
-
-
 
     if (u.scheme() == "file" || u.isLocalFile() || u.scheme() == "http" || u.scheme() == "https") {
         setMediaState(Loading);
@@ -563,6 +565,7 @@ bool FFmpegProvider::setMedia(const QString &_url)
         }
 
         _info.duration = MS(_ffmpeg->pFormatCtx->duration);
+        _ffmpeg->duration_in_ms = _info.duration;
 
         if (_ffmpeg->audio_stream_index >= 0) {
             auto ctx = _ffmpeg->pAudioCtx;
@@ -749,6 +752,11 @@ void FFmpegProvider::signalClearVideoBuffer()
     _ffmpeg->image_queue.clear();
 }
 
+void FFmpegProvider::signalSetState(FFmpegProvider::State s)
+{
+    emit setState(s);
+}
+
 void FFmpegProvider::audiobClearBuf()
 {
     if (_ffmpeg->sdl) {
@@ -842,6 +850,11 @@ void FFmpegProvider::handleAudioAvailable()
     }
 
     _ffmpeg->mutex.unlock();
+}
+
+void FFmpegProvider::handleSetState(FFmpegProvider::State s)
+{
+    setState(s);
 }
 
 void sdl_audio_callback(void *user_data, uint8_t *stream, int len)
@@ -1078,6 +1091,16 @@ DecoderThread::PlayState DecoderThread::toDecoderState(FFmpegProvider::State s)
     return r;
 }
 
+FFmpegProvider::State DecoderThread::toFFmpegState(PlayState s)
+{
+    switch(s) {
+    case Stopped: return FFmpegProvider::Stopped;
+    case Playing: return FFmpegProvider::Playing;
+    case Paused: return FFmpegProvider::Paused;
+    case Ended: return FFmpegProvider::Stopped;
+    }
+}
+
 static void setup_array(uint8_t* out[], AVFrame* in_frame, enum AVSampleFormat format, int /*samples*/)
 {
     if (av_sample_fmt_is_planar(format)) {
@@ -1102,10 +1125,12 @@ void DecoderThread::run()
     SwrContext *swr_ctx = nullptr;
     uint8_t **dst_data = nullptr;
 
-    int max_queue_depth = 10;
+    int max_queue_depth = 100;
 
     int max_n_samples = -1;
     int dst_linesize;
+    QElapsedTimer el;
+    int ms_count;
 
     auto audio_ctx = _ffmpeg->pAudioCtx;
     auto video_ctx = _ffmpeg->pVideoCtx;
@@ -1124,6 +1149,10 @@ void DecoderThread::run()
 
         swr_init(swr_ctx);
     }
+
+    auto at_end = [this](int ms) {
+        return ms > (_ffmpeg->duration_in_ms - 200);    // Don't finalize till the end, keep 0,2s of lag
+    };
 
     QByteArray tmp_audio_buf;
 
@@ -1150,19 +1179,46 @@ void DecoderThread::run()
 
         _mutex->unlock();
 
-        if (_current == Paused) {
-            msleep(5);
+        if (_current == Ended) {
+            if (_ffmpeg->image_queue.size() > 0) {
+                _mutex->lock();
+                _provider->signalImageAvailable();  // make sure we're trying to handle our video images
+                _provider->signalPcmAvailable();
+                _mutex->unlock();
+                msleep(1);
+            } else {
+                msleep(10);
+                _mutex->lock();
+                _ffmpeg->seek_frame = 0;
+                _mutex->unlock();
+                _request = Playing;
+                el.start();
+                ms_count = 200;     // Play for ms_count ms
+            }
+        } else if (_current == Paused) {
+            msleep(10);
         } else if (_current == Stopped) {
-            msleep(5);
+            msleep(10);
         } else { // Playing
+            if (el.isValid()) {
+                if (el.elapsed() >= ms_count) {
+                    _request = Stopped;
+                    el.invalidate();
+                    ms_count = -1;
+                    _provider->signalSetState(toFFmpegState(Stopped));
+                }
+            }
+
             // Check if the queue > max_queue_depth
             _mutex->lock();
             bool do_nothing = (_ffmpeg->image_queue.size() > max_queue_depth);
             _mutex->unlock();
 
             if (do_nothing) {
+                _mutex->lock();
                 _provider->signalImageAvailable();  // make sure we're trying to handle our video images
                 _provider->signalPcmAvailable();
+                _mutex->unlock();
                 msleep(1);
             } else {
                 _mutex->lock();
@@ -1177,10 +1233,13 @@ void DecoderThread::run()
                         int res = avcodec_send_packet(audio_ctx, pkt);
                         if (res < 0) {
                             ERR(FFmpegProvider::Internal, tr("Cannot send packet to audio controller"));
-                            _run = false;
+                            _request = Ended;
                         } else {
                             AVRational millisecondbase = { 1, 1000 };
                             int audio_position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->audio_stream_index]->time_base, millisecondbase);
+                            if (at_end(audio_position_in_ms)) {
+                                _request = Ended;
+                            }
 
                             while(res >= 0) {
                                 res = avcodec_receive_frame(audio_ctx, frame); // decodes to RAW PCM?
@@ -1241,13 +1300,16 @@ void DecoderThread::run()
                         int res = avcodec_send_packet(video_ctx, pkt);
                         if (res < 0) {
                             ERR(FFmpegProvider::Internal, tr("Cannot send packet to video controller"));
-                            _run = false;
+                            _request = Ended;
                         } else {
                             res = avcodec_receive_frame(video_ctx, _ffmpeg->pFrame);
                             if (res == 0) {
 
                                 AVRational millisecondbase = { 1, 1000 };
                                 _ffmpeg->position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->video_stream_index]->time_base, millisecondbase);
+                                if (at_end(_ffmpeg->position_in_ms)) {
+                                    _request = Ended;
+                                }
 
                                 AVCodecContext *ctx = video_ctx;
                                 int w = ctx->width;
@@ -1256,7 +1318,7 @@ void DecoderThread::run()
                                 sws = sws_getCachedContext(sws, w, h, ctx->pix_fmt, w, h, VIDEO_FORMAT, SWS_BILINEAR, NULL, NULL, NULL);
                                 if (sws == nullptr) {
                                     ERR(FFmpegProvider::Internal, tr("Cannot initialize conversion context"));
-                                    _run = false;
+                                    _request = Ended;
                                 } else {
                                     sws_scale(sws, _ffmpeg->pFrame->data, _ffmpeg->pFrame->linesize, 0, h, _ffmpeg->pFrameRGB->data, _ffmpeg->pFrameRGB->linesize);
                                 }
@@ -1275,7 +1337,11 @@ void DecoderThread::run()
                     }
                 } else {
                     if (ret == AVERROR_EOF) {
-                        ERR(FFmpegProvider::Internal, tr("End ov stream?"));
+                        ERR(FFmpegProvider::Internal, tr("End of stream."));
+                        _request = Ended;
+                    } else {
+                        ERR(FFmpegProvider::Internal, tr("Unclear %1").arg(ret));
+                        _request = Ended;
                     }
                 }
 
@@ -1283,7 +1349,6 @@ void DecoderThread::run()
             }
         }
     }
-
 
     if (dst_data) {
         av_freep(&dst_data[0]);

@@ -114,6 +114,8 @@ private:
 
     MediaPlayerControl *_control;
 
+    QString             _current_url;
+
     QList<std::function<void (State s)>> state_cbs;
     QList<std::function<void (MediaState s)>> mediastate_cbs;
     QList<std::function<void (const MediaEvent &e)>> mediaevent_cbs;
@@ -182,6 +184,7 @@ public:
     void signalPcmAvailable();
     void signalClearAudioBuffer();
     void signalClearVideoBuffer();
+    void signalSetState(State s);
 
 private:
     void resetProvider();
@@ -198,10 +201,12 @@ private:
 signals:
     void imageAvailable();
     void pcmAvailable();
+    void setStateSig(State s);
 
 private slots:
     void handleImageAvailable();
     void handleAudioAvailable();
+    void handleSetState(State s);
 };
 
 #endif // FFMPEGPROVIDER_H
