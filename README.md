@@ -1,0 +1,1 @@
+# qtmultimedia-plugin-ffmpeg
