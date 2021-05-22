@@ -12,7 +12,7 @@ so the ffmpeg plugin may be not selected.
 ## Build
 - Build and install. Just make it in QtCreator.
 - Make sure the right ffmpeg library is installed somewhere it can be found, see fmpeg-plugin.pro for details.
-- This plugin has been tested and build against ffmpeg 4.1.
+- This plugin has been tested and build against [ffmpeg 4.1](https://ffmpeg.org).
 - This plugin uses QtAudioOuput for audioplayback as a default backend, but if you have SDL2 somewhere installed it will be loaded and used instead.
 - Try a Qt multimedia example and use files that are supported (only) by ffmpeg
 
@@ -28,7 +28,7 @@ I didn't need that for my project. However, you can fork this project and create
 
 ## Thanks
 Thanks to Wang Bin for creating the basis for this multimedia plugin. I used his framework. 
-He has a great product MDK(https://github.com/wang-bin/qtmultimedia-plugins-mdk) that is much better 
+He has a great product [MDK](https://github.com/wang-bin/qtmultimedia-plugins-mdk) that is much better 
 than this ffmpeg plugin, but MDK is not free for commercial use. 
 
 Thanks to all persons who created programs and examples for using ffmpeg to stream video/audio.
