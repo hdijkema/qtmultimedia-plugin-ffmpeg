@@ -1136,7 +1136,7 @@ void DecoderThread::run()
     SwrContext *swr_ctx = nullptr;
     uint8_t **dst_data = nullptr;
 
-    int max_queue_depth = 100;
+    int max_queue_depth = 20;  // memory usage!
 
     int max_n_samples = -1;
     int dst_linesize;
@@ -1207,9 +1207,9 @@ void DecoderThread::run()
                 ms_count = 200;     // Play for ms_count ms
             }
         } else if (_current == Paused) {
-            msleep(10);
+            msleep(100);
         } else if (_current == Stopped) {
-            msleep(10);
+            msleep(100);
         } else { // Playing
             if (el.isValid()) {
                 if (el.elapsed() >= ms_count) {
@@ -1230,7 +1230,7 @@ void DecoderThread::run()
                 _provider->signalImageAvailable();  // make sure we're trying to handle our video images
                 _provider->signalPcmAvailable();
                 _mutex->unlock();
-                msleep(1);
+                msleep(3);  // frequency = 333Hz max
             } else {
                 _mutex->lock();
 
