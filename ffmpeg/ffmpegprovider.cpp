@@ -351,7 +351,10 @@ void FFmpegProvider::setVolume(int percentage)
     } else { // Qt backend
         int vol = (_ffmpeg->muted) ? 0 : _ffmpeg->volume_percent;
         if (_ffmpeg->audio_out) {
-            _ffmpeg->audio_out->setVolume(vol / 100.0);
+            qreal linearVolume = QAudio::convertVolume(vol / qreal(100.0),
+                                                       QAudio::LogarithmicVolumeScale,
+                                                       QAudio::LinearVolumeScale);
+            _ffmpeg->audio_out->setVolume(linearVolume);
         }
     }
 
@@ -866,9 +869,17 @@ void sdl_audio_callback(void *user_data, uint8_t *stream, int len)
     if (buf) {
         buf->mutex.lock();
 
-        int vol = (buf->muted) ? 0 : (SDL_MIX_MAXVOLUME * buf->volume_percent) / 100;
+        int vol_p = buf->volume_percent;
         int mixlen = (len < buf->audiobuf.size()) ? len : buf->audiobuf.size();
         SDL_AudioFormat fmt = buf->format;
+
+        // make vol act logarithmic
+        double pow2 = log2(SDL_MIX_MAXVOLUME);
+        double div = 100 / pow2;
+        double exp_vol = pow(2, vol_p / div);   // min = 1, max = 128
+        int v = static_cast<int>(round(exp_vol));
+        if (v == 1) { v = 0; }
+        int vol = (buf->muted) ? 0 : v;
 
         QByteArray b(buf->audiobuf.left(mixlen));
         buf->audiobuf = buf->audiobuf.mid(mixlen);
