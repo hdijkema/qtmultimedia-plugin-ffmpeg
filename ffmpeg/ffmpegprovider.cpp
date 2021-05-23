@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Hans Dijkema, License LGPLv3
+ * Copyright (C) 2021 Hans Dijkema, License LGPLv2.1
  *
  * https://github.com/hdijkema/qmultimedia-plugin-ffmpeg
  */
