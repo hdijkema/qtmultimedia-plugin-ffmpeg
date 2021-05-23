@@ -878,7 +878,7 @@ void sdl_audio_callback(void *user_data, uint8_t *stream, int len)
         double div = 100 / pow2;
         double exp_vol = pow(2, vol_p / div);   // min = 1, max = 128
         int v = static_cast<int>(round(exp_vol));
-        if (v == 1) { v = 0; }
+        if (exp_vol < 1.01) { v = 0; }
         int vol = (buf->muted) ? 0 : v;
 
         QByteArray b(buf->audiobuf.left(mixlen));
