@@ -7,7 +7,8 @@
 #include "ffmpegprovider.h"
 #include "mediaplayercontrol.h"
 
-#define VIDEO_FORMAT AV_PIX_FMT_RGB24
+//#define VIDEO_FORMAT AV_PIX_FMT_RGB24
+#define VIDEO_FORMAT AV_PIX_FMT_RGB32
 
 #include <QDebug>
 #include <QUrl>
@@ -911,8 +912,41 @@ const FFmpegProvider::Info &FFmpegProvider::mediaInfo() const
 
 void FFmpegProvider::setVideoSurfaceSize(int w, int h)
 {
+    LINE_DEBUG << w << h;
+    //w = 300; h = 300;
     _surface_size = QSize(w, h);
 }
+
+QImage *FFmpegProvider::getImage(bool &gotIt)
+{
+    if (_can_render) {
+        _ffmpeg->mutex.lock();
+
+        if (_ffmpeg->image_queue.size() > 0) {
+            FFmpegImage &fimg = _ffmpeg->image_queue.first();
+            _ffmpeg->mutex.unlock();
+            gotIt = true;
+            return &fimg.image;
+        }
+
+        _ffmpeg->mutex.unlock();
+    }
+
+    gotIt = false;
+    return nullptr;
+}
+
+void FFmpegProvider::popImage()
+{
+    _ffmpeg->mutex.lock();
+
+    if (_ffmpeg->image_queue.size() > 0) {
+        _ffmpeg->image_queue.dequeue();
+    }
+
+    _ffmpeg->mutex.unlock();
+}
+
 
 void FFmpegProvider::renderVideo(QPainter *p)
 {
@@ -1109,6 +1143,7 @@ FFmpegProvider::State DecoderThread::toFFmpegState(PlayState s)
     case Playing: return FFmpegProvider::Playing;
     case Paused: return FFmpegProvider::Paused;
     case Ended: return FFmpegProvider::Stopped;
+    default: return FFmpegProvider::Stopped;
     }
 }
 
@@ -1335,9 +1370,10 @@ void DecoderThread::run()
                                 }
 
                                 FFmpegImage fimg;
-                                fimg.image = QImage(w, h, QImage::Format_RGB888);
+                                //fimg.image = QImage(w, h, QImage::Format_RGB888);
+                                fimg.image = QImage(w, h, QImage::Format_RGB32);
                                 for(int y = 0; y < h; y++) {
-                                    memcpy(fimg.image.scanLine(y), _ffmpeg->pFrameRGB->data[0] + y * _ffmpeg->pFrameRGB->linesize[0], w * 3);
+                                    memcpy(fimg.image.scanLine(y), _ffmpeg->pFrameRGB->data[0] + y * _ffmpeg->pFrameRGB->linesize[0], w * 4);
                                 }
                                 fimg.position_in_ms = _ffmpeg->position_in_ms;
                                 _ffmpeg->image_queue.enqueue(fimg);

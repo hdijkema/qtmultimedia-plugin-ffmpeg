@@ -168,6 +168,8 @@ public:
     void setVideoSurfaceSize(int w, int h);
     void scale(qreal x, qreal y);
     void renderVideo(QPainter *p);
+    QImage *getImage(bool &gotIt);
+    void popImage();
 
 public:
     void setAspectRatio(float ar);
