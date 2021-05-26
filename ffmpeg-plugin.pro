@@ -69,4 +69,5 @@ include(ffmpeg/ffmpeg.pri)
 
 DISTFILES += \
     .qmake.conf \
+    LICENSE \
     README.md

@@ -1,5 +1,8 @@
 /*
- * Copyright (C) 2021 Hans Dijkema, License: LGPLv2.1
+ * ffmpeg-plugin - a Qt MultiMedia plugin for playback of video/audio using
+ * the ffmpeg library for decoding.
+ *
+ * Copyright (C) 2021 Hans Dijkema, License: LGPLv3
  * https://github.com/hdijkema/qmultimedia-plugin-ffmpeg
  *
  * Derived from the work of Wang Bin

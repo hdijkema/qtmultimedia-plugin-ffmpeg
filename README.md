@@ -36,7 +36,7 @@ Thanks to all persons who created programs and examples for using ffmpeg to stre
 Without it, I would have been lost. 
 
 ## License
-This plugin library for Qt is licensed under LGPLv2.1. 
+This plugin library for Qt is licensed under LGPLv3. 
 
 ## See Also
 - Checkout the zcVideoWidget that can be used to display video that is being played with the Qt MultiMedia framework
