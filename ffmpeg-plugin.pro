@@ -15,11 +15,16 @@ CONFIG(debug, debug|release) {
     win32: LIBS += -L$$MYLIBDIR/win64/lib
 }
 
+mac: MYLIBDIR = /Users/hans/devel/libraries
+mac: INCLUDEPATH += $$MYLIBDIR/osx/include/ffmpeg $$MYLIBDIR/osx/include
+mac: LIBS += -L$$MYLIBDIR/osx/lib
+
 ###################################################################################
 # Link to the right libraries
 ###################################################################################
 
 win32: LIBS += -lavcodec -lavformat -lavutil -lswscale -lswresample
+mac: LIBS += -lavcodec -lavformat -lavutil -lswscale -lswresample
 
 ###################################################################################
 # The hard work
