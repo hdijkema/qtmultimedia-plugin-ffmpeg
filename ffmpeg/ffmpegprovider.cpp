@@ -262,7 +262,7 @@ FFmpegProvider::FFmpegProvider(MediaPlayerControl *parent)
     _ffmpeg = new FFmpeg();
     _decoder = nullptr;
 
-    setObjectName(QString::asprintf("FFmpegProvider_%x",reinterpret_cast<qint64>(this)));
+    setObjectName(QString::asprintf("FFmpegProvider_0x%llx",reinterpret_cast<qint64>(this)));
 
     _control = parent;
 
