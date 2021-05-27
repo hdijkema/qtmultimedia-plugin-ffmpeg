@@ -13,8 +13,8 @@ so the ffmpeg plugin may be not selected.
 ## Build
 - Build and install. Just qmake it in QtCreator.
 - Make sure the right ffmpeg library is installed somewhere it can be found, see fmpeg-plugin.pro for details.
-- This plugin has been tested and build against [ffmpeg 4.1](https://ffmpeg.org).
-- This plugin uses QtAudioOuput for audioplayback as a default backend, but if you have SDL2 somewhere installed it will be loaded and used instead.
+- This plugin has been tested and build against [ffmpeg 4.1 and ffmpeg 4.4)](https://ffmpeg.org).
+- This plugin uses QtAudioOuput for audioplayback as a default backend, but if you have SDL2 somewhere installed it will be loaded and used instead. Using SDL2 is recommended.
 - Try a Qt multimedia example and use files that are supported (only) by ffmpeg
 
 ## Install
@@ -39,6 +39,6 @@ Without it, I would have been lost.
 This plugin library for Qt is licensed under LGPLv3. 
 
 ## See Also
-- Checkout the zcVideoWidget that can be used to display video that is being played with the Qt MultiMedia framework
+- Checkout the [zcVideoWidget](https://github.com/hdijkema/zcvideowidget) that can be used to display video that is being played with the Qt MultiMedia framework
 
 

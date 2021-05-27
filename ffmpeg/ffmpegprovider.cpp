@@ -1217,7 +1217,7 @@ void DecoderThread::run()
             _ffmpeg->pos_offset_in_ms = MS(_ffmpeg->seek_frame);
             _ffmpeg->elapsed.start();
 
-            av_seek_frame(format_ctx, -1, _ffmpeg->seek_frame, 0);
+            av_seek_frame(format_ctx, -1, _ffmpeg->seek_frame, AVSEEK_FLAG_FRAME);
             if (video_ctx != nullptr) avcodec_flush_buffers(video_ctx);
             if (audio_ctx != nullptr) avcodec_flush_buffers(audio_ctx);
 
