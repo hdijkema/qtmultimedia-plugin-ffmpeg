@@ -40,5 +40,6 @@ This plugin library for Qt is licensed under LGPLv3.
 
 ## See Also
 - Checkout the [zcVideoWidget](https://github.com/hdijkema/zcvideowidget) that can be used to display video that is being played with the Qt MultiMedia framework
+- For binary builds of ffmpeg for most platforms, see [here](https://github.com/wang-bin/avbuild).
 
 
