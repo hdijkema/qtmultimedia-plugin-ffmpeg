@@ -262,7 +262,8 @@ FFmpegProvider::FFmpegProvider(MediaPlayerControl *parent)
     _ffmpeg = new FFmpeg();
     _decoder = nullptr;
 
-    setObjectName(QString::asprintf("FFmpegProvider_%x",reinterpret_cast<qint64>(this)));
+    quint64 ptr = reinterpret_cast<quint64>(this);
+    setObjectName(QString::asprintf("FFmpegProvider_%llx", ptr));
 
     _control = parent;
 
@@ -662,6 +663,11 @@ bool FFmpegProvider::setMedia(const QString &_url)
         startThreads();
         seek(0);
 
+        /*
+        setMediaState(Buffering);
+        QThread::msleep(250);
+        */
+
         setMediaState(Loaded);
 
         return true;
@@ -710,6 +716,9 @@ void FFmpegProvider::signalImageAvailable()
         FFmpegImage &img = _ffmpeg->image_queue.first();
         int pos_in_ms = img.position_in_ms;
         int current_time_ms = _ffmpeg->pos_offset_in_ms + _ffmpeg->elapsed.elapsed();
+
+        LINE_DEBUG << pos_in_ms << current_time_ms;
+
         if (current_time_ms >= pos_in_ms) {
             emit imageAvailable();
         }
@@ -739,7 +748,9 @@ void FFmpegProvider::signalPcmAvailable()
         int pos_in_ms = audio.position_in_ms;
         int threshold_ms = audioThresholdMs();
 
-        if (threshold_ms >= pos_in_ms) {
+        //LINE_DEBUG << pos_in_ms << threshold_ms << audio.clear;
+
+        if (threshold_ms >= pos_in_ms || audio.clear) {
             emit pcmAvailable();
         }
     }
@@ -750,6 +761,7 @@ void FFmpegProvider::signalClearAudioBuffer()
     _ffmpeg->audio_queue.clear();
 
     FFmpegAudio au;
+    au.position_in_ms = -1;
     au.clear = true;
 
     _ffmpeg->audio_queue.enqueue(au);
@@ -834,8 +846,15 @@ void FFmpegProvider::handleAudioAvailable()
         int threshold_ms = audioThresholdMs();
         bool buffer_off_checked = false;
 
+       //int current_time_ms = _ffmpeg->pos_offset_in_ms + _ffmpeg->elapsed.elapsed();
+       //LINE_DEBUG << current_time_ms << threshold_ms;
+
         while(_ffmpeg->audio_queue.size() > 0 &&
-              (_ffmpeg->audio_queue.first().position_in_ms) <= threshold_ms) {
+              (((_ffmpeg->audio_queue.first().position_in_ms) <= threshold_ms) || _ffmpeg->audio_queue.first().clear)
+             ) {
+
+            //LINE_DEBUG << _ffmpeg->audio_queue.first().position_in_ms;
+
             FFmpegAudio &au = _ffmpeg->audio_queue.first();
 
             if (au.clear) {
@@ -1210,6 +1229,9 @@ void DecoderThread::run()
         _mutex->lock();
 
         if (_request != _current) {
+            if (_current == Paused) {
+                _ffmpeg->elapsed.start();
+            }
             _current = _request;
         }
 
@@ -1287,6 +1309,7 @@ void DecoderThread::run()
                         } else {
                             AVRational millisecondbase = { 1, 1000 };
                             int audio_position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->audio_stream_index]->time_base, millisecondbase);
+                            //LINE_DEBUG << "audio" << audio_position_in_ms;
                             if (at_end(audio_position_in_ms)) {
                                 _request = Ended;
                             }
@@ -1341,6 +1364,9 @@ void DecoderThread::run()
                             au.audio = tmp_audio_buf;
                             au.position_in_ms = audio_position_in_ms;
                             au.clear = false;
+
+                            //LINE_DEBUG << au.position_in_ms << _ffmpeg->audio_queue.size();
+
                             _ffmpeg->audio_queue.enqueue(au);
                             _provider->signalPcmAvailable();
 
@@ -1357,6 +1383,7 @@ void DecoderThread::run()
 
                                 AVRational millisecondbase = { 1, 1000 };
                                 _ffmpeg->position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->video_stream_index]->time_base, millisecondbase);
+                                LINE_DEBUG << "video" << _ffmpeg->position_in_ms;
                                 if (at_end(_ffmpeg->position_in_ms)) {
                                     _request = Ended;
                                 }
