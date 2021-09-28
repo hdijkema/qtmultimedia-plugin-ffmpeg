@@ -14,6 +14,12 @@
 //#define VIDEO_FORMAT AV_PIX_FMT_RGB24
 #define VIDEO_FORMAT AV_PIX_FMT_RGB32
 
+#define SEEK_BEGIN -98765
+#define SEEK_CONTINUE -99223
+
+#define AUDIO_THRESHOLD_EXTRA_MS 200
+#define AUDIO_MAX_OFF_MS 300
+
 #include <QDebug>
 #include <QUrl>
 #include <QThread>
@@ -26,6 +32,7 @@
 #include <QLibrary>
 #include <QProcessEnvironment>
 #include <QAudioOutput>
+#include <QAbstractVideoBuffer>
 
 #include <QPainter>
 #include <QOpenGLPaintDevice>
@@ -402,7 +409,11 @@ void FFmpegProvider::setPlaybackRate(qreal /*rate*/)
 void FFmpegProvider::seek(qint64 pos_in_ms)
 {
     _ffmpeg->mutex.lock();
-    _ffmpeg->seek_frame = FS(pos_in_ms);
+    if (pos_in_ms == SEEK_BEGIN) {
+        _ffmpeg->seek_frame = SEEK_BEGIN;
+    } else {
+        _ffmpeg->seek_frame = FS(pos_in_ms);
+    }
     _ffmpeg->mutex.unlock();
 }
 
@@ -504,8 +515,35 @@ bool FFmpegProvider::setMedia(const QString &_url)
             return false;
         }
 
-        _ffmpeg->audio_stream_index = av_find_best_stream(_ffmpeg->pFormatCtx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-        _ffmpeg->video_stream_index = av_find_best_stream(_ffmpeg->pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+
+        int videoStream = -1;
+        int audioStream = -1;
+
+        audioStream= av_find_best_stream(_ffmpeg->pFormatCtx, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+        videoStream = av_find_best_stream(_ffmpeg->pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+
+        //LINE_DEBUG;
+        // Find the video and audio stream
+        {
+            for (unsigned int i = 0; i < _ffmpeg->pFormatCtx->nb_streams; i++) {
+                // look for the video stream
+                if (_ffmpeg->pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && videoStream < 0)
+                {
+                    videoStream = static_cast<int>(i);
+                }
+
+                // look for the audio stream
+                if (_ffmpeg->pFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && audioStream < 0)
+                {
+                    audioStream = static_cast<int>(i);
+                }
+            }
+        }
+
+        _ffmpeg->audio_stream_index = audioStream;
+        _ffmpeg->video_stream_index = videoStream;
+
+        //LINE_DEBUG << audioStream << videoStream;
 
         if (_ffmpeg->audio_stream_index >= 0) {
             _info.has_audio = true;
@@ -541,6 +579,8 @@ bool FFmpegProvider::setMedia(const QString &_url)
             _info.has_audio = false;
         }
 
+        //LINE_DEBUG;
+
         if (_ffmpeg->video_stream_index >= 0) {
             _info.has_video = true;
             auto codec_par = _ffmpeg->pFormatCtx->streams[_ffmpeg->video_stream_index]->codecpar;
@@ -573,8 +613,12 @@ bool FFmpegProvider::setMedia(const QString &_url)
             }
         }
 
+        //LINE_DEBUG;
+
         _info.duration = MS(_ffmpeg->pFormatCtx->duration);
-        _ffmpeg->duration_in_ms = _info.duration;
+        _ffmpeg->duration_in_ms = static_cast<int>(_info.duration);
+
+        //LINE_DEBUG;
 
         if (_ffmpeg->audio_stream_index >= 0) {
             auto ctx = _ffmpeg->pAudioCtx;
@@ -583,6 +627,8 @@ bool FFmpegProvider::setMedia(const QString &_url)
             _info.audio.sample_rate = ctx->sample_rate;
             _info.audio.codec = QString::fromUtf8(ctx->codec_descriptor->name);
         }
+
+        //LINE_DEBUG;
 
         if (_ffmpeg->video_stream_index >= 0) {
             auto ctx = _ffmpeg->pVideoCtx;
@@ -593,16 +639,27 @@ bool FFmpegProvider::setMedia(const QString &_url)
             _info.video.codec = QString::fromUtf8(ctx->codec_descriptor->name);
         }
 
+        //LINE_DEBUG;
+
         LINE_INFO << "Video information:";
         LINE_INFO << "Width:" << _info.video.width << "Height:" << _info.video.height;
         LINE_INFO << "Framrate:" << _info.video.frame_rate << "Bitrate:" << _info.video.bit_rate;
         LINE_INFO << "Codec:" << _info.video.codec;
         LINE_INFO << "Duration:" << _info.duration;
+        LINE_INFO << "Audio information:";
+        LINE_INFO << "Bitrate:" << _info.audio.bit_rate;
+        LINE_INFO << "Channels:" << _info.audio.channels;
+        LINE_INFO << "Sample Rate:" << _info.audio.sample_rate;
+        LINE_INFO << "Codec:" << _info.audio.codec;
+
+        //LINE_DEBUG;
 
         if (!allocBuffers()) {
             setMediaState(Invalid);
             return false;
         }
+
+        //LINE_DEBUG;
 
         bool try_qt_audio = false;
 
@@ -660,14 +717,13 @@ bool FFmpegProvider::setMedia(const QString &_url)
             _ffmpeg->audio_io = nullptr;
         }
 
+        //LINE_DEBUG;
         startThreads();
-        seek(0);
 
-        /*
-        setMediaState(Buffering);
-        QThread::msleep(250);
-        */
+        //LINE_DEBUG;
+        seek(SEEK_BEGIN);
 
+        //LINE_DEBUG;
         setMediaState(Loaded);
 
         return true;
@@ -714,11 +770,9 @@ void FFmpegProvider::signalImageAvailable()
     // If so, we emit the signal.
     if (_ffmpeg->image_queue.size() > 0) {
         FFmpegImage &img = _ffmpeg->image_queue.first();
+
         int pos_in_ms = img.position_in_ms;
         int current_time_ms = _ffmpeg->pos_offset_in_ms + _ffmpeg->elapsed.elapsed();
-
-        LINE_DEBUG << pos_in_ms << current_time_ms;
-
         if (current_time_ms >= pos_in_ms) {
             emit imageAvailable();
         }
@@ -733,7 +787,7 @@ void FFmpegProvider::handleImageAvailable()
 int FFmpegProvider::audioThresholdMs()
 {
     int current_time_ms = _ffmpeg->pos_offset_in_ms + _ffmpeg->elapsed.elapsed();
-    int extra_time_ms = 100;
+    int extra_time_ms = AUDIO_THRESHOLD_EXTRA_MS;
     int threshold_ms = (current_time_ms + extra_time_ms);
     return threshold_ms;
 }
@@ -743,15 +797,20 @@ void FFmpegProvider::signalPcmAvailable()
     // Check if we need to fillup more in the audiobuffer
     // if so, we emit the signal
     if (_ffmpeg->audio_queue.size() > 0) {
-        FFmpegAudio &audio = _ffmpeg->audio_queue.first();
+        int i, N;
+        for(i = 1, N = _ffmpeg->audio_queue.size(); i < N && _ffmpeg->audio_queue[i].clear; i++);
 
-        int pos_in_ms = audio.position_in_ms;
-        int threshold_ms = audioThresholdMs();
+        if (i == N) {
+            // do nothing
+        } else {
+            FFmpegAudio &audio = _ffmpeg->audio_queue[i];
 
-        //LINE_DEBUG << pos_in_ms << threshold_ms << audio.clear;
+            int pos_in_ms = audio.position_in_ms;
+            int threshold_ms = audioThresholdMs();
 
-        if (threshold_ms >= pos_in_ms || audio.clear) {
-            emit pcmAvailable();
+            if (threshold_ms >= pos_in_ms || audio.clear) {
+                emit pcmAvailable();
+            }
         }
     }
 }
@@ -845,9 +904,7 @@ void FFmpegProvider::handleAudioAvailable()
 
         int threshold_ms = audioThresholdMs();
         bool buffer_off_checked = false;
-
-       //int current_time_ms = _ffmpeg->pos_offset_in_ms + _ffmpeg->elapsed.elapsed();
-       //LINE_DEBUG << current_time_ms << threshold_ms;
+        bool prev_was_clear = false;
 
         while(_ffmpeg->audio_queue.size() > 0 &&
               (((_ffmpeg->audio_queue.first().position_in_ms) <= threshold_ms) || _ffmpeg->audio_queue.first().clear)
@@ -858,10 +915,14 @@ void FFmpegProvider::handleAudioAvailable()
             FFmpegAudio &au = _ffmpeg->audio_queue.first();
 
             if (au.clear) {
-                audiobClearBuf();
+                if (!prev_was_clear) {
+                    audiobClearBuf();
+                    prev_was_clear = true;
+                }
             } else if (!buffer_off_checked) {
+                prev_was_clear = false;
                 int ms_in_buffer = audiobBufSizeInMs();
-                int max_ms_off = 150;
+                int max_ms_off = AUDIO_MAX_OFF_MS;
                 if (ms_in_buffer > max_ms_off) {
                     audiobClearBuf();
                 }
@@ -935,9 +996,12 @@ const FFmpegProvider::Info &FFmpegProvider::mediaInfo() const
 
 void FFmpegProvider::setVideoSurfaceSize(int w, int h)
 {
-    LINE_DEBUG << w << h;
-    //w = 300; h = 300;
     _surface_size = QSize(w, h);
+}
+
+QSize FFmpegProvider::getVideoSurfaceSize() const
+{
+    return _surface_size;
 }
 
 QImage *FFmpegProvider::getImage(bool &gotIt)
@@ -1195,6 +1259,7 @@ void DecoderThread::run()
     uint8_t **dst_data = nullptr;
 
     int max_queue_depth = 20;  // memory usage!
+    int min_queue_depth = 10;
 
     int max_n_samples = -1;
     int dst_linesize;
@@ -1225,28 +1290,54 @@ void DecoderThread::run()
 
     QByteArray tmp_audio_buf;
 
+    int pause_offset_ms = -1;
+    bool dont_decode = false;
+
     while(_run) {
+
         _mutex->lock();
 
         if (_request != _current) {
             if (_current == Paused) {
-                _ffmpeg->elapsed.start();
+                _ffmpeg->seek_frame = SEEK_CONTINUE;
             }
+
+            if (_request == Paused) {
+                if (pause_offset_ms < 0) {
+                    pause_offset_ms = _ffmpeg->elapsed.elapsed() + _ffmpeg->pos_offset_in_ms;
+                }
+            }
+
             _current = _request;
         }
 
-        if (_ffmpeg->seek_frame >= 0) {
-            _ffmpeg->pos_offset_in_ms = MS(_ffmpeg->seek_frame);
+        if (_ffmpeg->seek_frame >= 0 || _ffmpeg->seek_frame == SEEK_BEGIN || _ffmpeg->seek_frame == SEEK_CONTINUE) {
+            bool s_begin = (_ffmpeg->seek_frame == SEEK_BEGIN);
+            bool s_continue = (_ffmpeg->seek_frame == SEEK_CONTINUE);
+
+            if (!s_begin && !s_continue) {
+                if (_current == Paused) {
+                    pause_offset_ms = MS(_ffmpeg->seek_frame);
+                } else {
+                    _ffmpeg->pos_offset_in_ms = MS(_ffmpeg->seek_frame);
+                }
+                av_seek_frame(format_ctx, -1, _ffmpeg->seek_frame, AVSEEK_FLAG_FRAME);
+            } else if (s_begin) {
+                _ffmpeg->pos_offset_in_ms = MS(0);
+            } else if (s_continue) {
+                _ffmpeg->pos_offset_in_ms = pause_offset_ms;
+                pause_offset_ms = -1;
+            }
+
             _ffmpeg->elapsed.start();
-
-            av_seek_frame(format_ctx, -1, _ffmpeg->seek_frame, AVSEEK_FLAG_FRAME);
-            if (video_ctx != nullptr) avcodec_flush_buffers(video_ctx);
-            if (audio_ctx != nullptr) avcodec_flush_buffers(audio_ctx);
-
             _ffmpeg->seek_frame = -1;
 
-            _provider->signalClearAudioBuffer();
-            _provider->signalClearVideoBuffer();
+            if (!s_continue) {
+                if (video_ctx != nullptr) avcodec_flush_buffers(video_ctx);
+                if (audio_ctx != nullptr) avcodec_flush_buffers(audio_ctx);
+                _provider->signalClearAudioBuffer();
+                _provider->signalClearVideoBuffer();
+            }
         }
 
         _mutex->unlock();
@@ -1283,10 +1374,20 @@ void DecoderThread::run()
 
             // Check if the queue > max_queue_depth
             _mutex->lock();
-            bool do_nothing = (_ffmpeg->image_queue.size() > max_queue_depth);
+            int queue_depth = _ffmpeg->image_queue.size();
             _mutex->unlock();
 
-            if (do_nothing) {
+            if (dont_decode) {
+                if (queue_depth <= min_queue_depth) {
+                    dont_decode = false;
+                }
+            } else {
+                if (queue_depth >= max_queue_depth) {
+                    dont_decode = true;
+                }
+            }
+
+            if (dont_decode) {
                 _mutex->lock();
                 _provider->signalImageAvailable();  // make sure we're trying to handle our video images
                 _provider->signalPcmAvailable();
@@ -1297,6 +1398,8 @@ void DecoderThread::run()
 
                 // Read from ffmpeg
                 int ret = av_read_frame(format_ctx, pkt);
+
+
                 if (ret == 0) {
                     if (pkt->stream_index == _ffmpeg->audio_stream_index) {
 
@@ -1309,7 +1412,7 @@ void DecoderThread::run()
                         } else {
                             AVRational millisecondbase = { 1, 1000 };
                             int audio_position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->audio_stream_index]->time_base, millisecondbase);
-                            //LINE_DEBUG << "audio" << audio_position_in_ms;
+
                             if (at_end(audio_position_in_ms)) {
                                 _request = Ended;
                             }
@@ -1364,9 +1467,6 @@ void DecoderThread::run()
                             au.audio = tmp_audio_buf;
                             au.position_in_ms = audio_position_in_ms;
                             au.clear = false;
-
-                            //LINE_DEBUG << au.position_in_ms << _ffmpeg->audio_queue.size();
-
                             _ffmpeg->audio_queue.enqueue(au);
                             _provider->signalPcmAvailable();
 
@@ -1383,29 +1483,32 @@ void DecoderThread::run()
 
                                 AVRational millisecondbase = { 1, 1000 };
                                 _ffmpeg->position_in_ms = av_rescale_q(pkt->dts, format_ctx->streams[_ffmpeg->video_stream_index]->time_base, millisecondbase);
-                                LINE_DEBUG << "video" << _ffmpeg->position_in_ms;
                                 if (at_end(_ffmpeg->position_in_ms)) {
                                     _request = Ended;
                                 }
+
 
                                 AVCodecContext *ctx = video_ctx;
                                 int w = ctx->width;
                                 int h = ctx->height;
 
-                                sws = sws_getCachedContext(sws, w, h, ctx->pix_fmt, w, h, VIDEO_FORMAT, SWS_BILINEAR, NULL, NULL, NULL);
+                                int flags = SWS_BILINEAR; // SWS_POINT;  // SWS_FAST_BILINEAR;      // SWS_BILINEAR
+
+                                sws = sws_getCachedContext(sws, w, h, ctx->pix_fmt, w, h, VIDEO_FORMAT, flags, NULL, NULL, NULL);
+
+                                FFmpegImage fimg;
+                                fimg.image = QImage(w, h, QImage::Format_RGB32);
+
                                 if (sws == nullptr) {
                                     ERR(FFmpegProvider::Internal, tr("Cannot initialize conversion context"));
                                     _request = Ended;
                                 } else {
-                                    sws_scale(sws, _ffmpeg->pFrame->data, _ffmpeg->pFrame->linesize, 0, h, _ffmpeg->pFrameRGB->data, _ffmpeg->pFrameRGB->linesize);
+                                    unsigned char *img[8] = { fimg.image.bits() };
+                                    int rgb_linesize[8] = { 0 };
+                                    rgb_linesize[0] = w * 4;
+                                    sws_scale(sws, _ffmpeg->pFrame->data, _ffmpeg->pFrame->linesize, 0, h, img, rgb_linesize);
                                 }
 
-                                FFmpegImage fimg;
-                                //fimg.image = QImage(w, h, QImage::Format_RGB888);
-                                fimg.image = QImage(w, h, QImage::Format_RGB32);
-                                for(int y = 0; y < h; y++) {
-                                    memcpy(fimg.image.scanLine(y), _ffmpeg->pFrameRGB->data[0] + y * _ffmpeg->pFrameRGB->linesize[0], w * 4);
-                                }
                                 fimg.position_in_ms = _ffmpeg->position_in_ms;
                                 _ffmpeg->image_queue.enqueue(fimg);
 
@@ -1545,3 +1648,4 @@ static LibSdl *loadSdl()
         return nullptr;
     }
 }
+
