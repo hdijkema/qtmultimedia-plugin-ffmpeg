@@ -1,3 +1,6 @@
+# QT6 support
+As QT6 has removed the plugin structure and supports a lot more video formats, this plugin is not necessary anymore for QT6.
+
 # qtmultimedia-plugin-ffmpeg
 
 Qt multimedia plugins implemented on top of ffmpeg
